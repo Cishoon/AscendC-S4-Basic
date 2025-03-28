@@ -97,16 +97,21 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     // uint32_t rate = 3 * r + 1 + 2 * r + 2; // 3r: x1, x2, y; 1: condition; 2r: oneBuf, condBuf; 2: castBuf
     uint32_t rate;
     auto x1DataType = context->GetInputDesc(1)->GetDataType();
-    if (x1DataType == ge::DataType::DT_FLOAT16) {
-        rate = 11;
-    } else if (x1DataType == ge::DataType::DT_FLOAT) {
-        rate = 23;
-    } else if (x1DataType == ge::DataType::DT_INT8) {
-        rate = 14;
-    } else if (x1DataType == ge::DataType::DT_INT32) {
-        rate = 23;
-    } else {
-        return ge::GRAPH_FAILED;
+    switch (x1DataType) {
+        case ge::DataType::DT_FLOAT16:
+            rate = 11;
+            break;
+        case ge::DataType::DT_FLOAT:
+            rate = 23;
+            break;
+        case ge::DataType::DT_INT8:
+            rate = 14;
+            break;
+        case ge::DataType::DT_INT32:
+            rate = 23;
+            break;
+        default:
+            return ge::GRAPH_FAILED;
     }
     
     uint32_t tileCondBlockNum = ubSize / BUFFER_NUM / BLOCK_SIZE / rate;
