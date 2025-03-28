@@ -28,35 +28,24 @@ private:
 public:
     __aicore__ inline KernelSelectV2() {}
     __aicore__ inline void Init(GM_ADDR condition, GM_ADDR x1, GM_ADDR x2, GM_ADDR y, 
-                                uint32_t bigDataNum, uint32_t smallDataNum, uint32_t finalBigTileNum, uint32_t finalSmallTileNum, 
-                                uint32_t tileDataNum, uint32_t bigTailDataNum, uint32_t smallTailDataNum, uint32_t tailBlockNum,
+                                uint32_t smallDataNum, uint32_t finalSmallTileNum, 
+                                uint32_t tileDataNum, uint32_t smallTailDataNum, 
                                 uint32_t* condShape, uint32_t* x1Shape, uint32_t* x2Shape, uint32_t* yShape, uint32_t yDimNum, 
                                 uint32_t* condStrides, uint32_t* x1Strides, uint32_t* x2Strides, uint32_t* yStrides)
     {
         uint32_t blockNum = AscendC::GetBlockNum();
         ASSERT(blockNum != 0 && "GetBlockNum() is 0");
         
-        uint32_t blockIdx = AscendC::GetBlockIdx();
         this->tileDataNum = tileDataNum;
         
-        uint32_t globalBufferIndex; // 这个核处理数据的起始地址
-        if (blockIdx < tailBlockNum) { // 大核
-            this->dataNum = bigDataNum;
-            this->tileNum = finalBigTileNum;
-            this->tailDataNum = bigTailDataNum;
-            globalBufferIndex = bigDataNum * blockIdx;
-        } else { // 小核
-            this->dataNum = smallDataNum;
-            this->tileNum = finalSmallTileNum;
-            this->tailDataNum = smallTailDataNum;
-            globalBufferIndex = bigDataNum * tailBlockNum + smallDataNum * (blockIdx - tailBlockNum);
-        }
+        this->dataNum = smallDataNum;
+        this->tileNum = finalSmallTileNum;
+        this->tailDataNum = smallTailDataNum;
         
-        conditionGm.SetGlobalBuffer((__gm__ DTYPE_CONDITION *)condition + globalBufferIndex, this->dataNum);
-        x1Gm.SetGlobalBuffer((__gm__ DTYPE_X1 *)x1 + globalBufferIndex, this->dataNum);
-        x2Gm.SetGlobalBuffer((__gm__ DTYPE_X2 *)x2 + globalBufferIndex, this->dataNum);
-        yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y + globalBufferIndex, this->dataNum);
-
+        conditionGm.SetGlobalBuffer((__gm__ DTYPE_CONDITION *)condition, this->dataNum);
+        x1Gm.SetGlobalBuffer((__gm__ DTYPE_X1 *)x1, this->dataNum);
+        x2Gm.SetGlobalBuffer((__gm__ DTYPE_X2 *)x2, this->dataNum);
+        yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, this->dataNum);
         
         pipe.InitBuffer(inQueueCondition, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_CONDITION));
         pipe.InitBuffer(inQueueX1, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_X1));
@@ -313,8 +302,8 @@ private:
 extern "C" __global__ __aicore__ void select_v2(GM_ADDR condition, GM_ADDR x1, GM_ADDR x2, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling) {
     GET_TILING_DATA(tiling_data, tiling);
     KernelSelectV2 op;
-    op.Init(condition, x1, x2, y, tiling_data.bigDataNum, tiling_data.smallDataNum, tiling_data.finalBigTileNum, tiling_data.finalSmallTileNum, 
-            tiling_data.tileDataNum, tiling_data.bigTailDataNum, tiling_data.smallTailDataNum, tiling_data.tailBlockNum,
+    op.Init(condition, x1, x2, y, tiling_data.smallDataNum, tiling_data.finalSmallTileNum, 
+            tiling_data.tileDataNum, tiling_data.smallTailDataNum, 
             tiling_data.condShape, tiling_data.x1Shape, tiling_data.x2Shape, tiling_data.yShape, tiling_data.yDimNum, 
             tiling_data.condStrides, tiling_data.x1Strides, tiling_data.x2Strides, tiling_data.yStrides);
     op.Process();

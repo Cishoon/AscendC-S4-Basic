@@ -73,12 +73,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     // 每个核一次计算最多能处理的字节数，从接口获取
     uint64_t ubSize; 	
     ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ubSize);
-
-    // 获取AICore数量
-    auto coreNum = ascendcPlatform.GetCoreNum();
-    auto aivNum = ascendcPlatform.GetCoreNumAiv();
-    coreNum = needBroadcast ? 1 : aivNum;
-    context->SetBlockDim(coreNum);
     
     // 获取输入数据数量, totalDataNum表示几个元素
     uint32_t totalDataNum = context->GetOutputShape(0)->GetOriginShape().GetShapeSize();
@@ -115,50 +109,26 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     }
     
     uint32_t tileCondBlockNum = ubSize / BUFFER_NUM / BLOCK_SIZE / rate;
-    // 2. 一个tile里的总block数量
-    uint32_t tileBlockNum = rate * tileCondBlockNum;
     // 3. 一个tile里的数据数量
     uint32_t tileDataNum = BLOCK_SIZE * tileCondBlockNum / condTypeLength;
     
-    /// 计算核数上下界
-    coreNum = (coreNum < condBlockNum) ? coreNum : condBlockNum;
-    coreNum = (coreNum >= 1) ? coreNum : 1;
-        
     // 每个核平均计算几个cond block
-    uint32_t everyCoreInputCondBlock = condBlockNum / coreNum;
+    // uint32_t everyCoreInputCondBlock = condBlockNum;
     // 余数，即需要多少个大核
-    uint32_t tailBlockNum = condBlockNum % coreNum;
+    // uint32_t tailBlockNum = 0;
     
-    /// 计算小核其他参数
-    // 1. 小核处理的总数据数量（个）
-    uint32_t smallDataNum = everyCoreInputCondBlock * BLOCK_SIZE / condTypeLength;
-    // 2. 小核处理的tile数量, finalSmallTileNum
-    uint32_t smallTileNum = everyCoreInputCondBlock / tileCondBlockNum;
-    uint32_t finalSmallTileNum = (everyCoreInputCondBlock % tileCondBlockNum == 0) ? smallTileNum : smallTileNum + 1;
-    // 3. 最后一次搬运的数据数量
+    uint32_t smallDataNum = condBlockNum * BLOCK_SIZE / condTypeLength;
+    uint32_t smallTileNum = condBlockNum / tileCondBlockNum;
+    uint32_t finalSmallTileNum = (condBlockNum % tileCondBlockNum == 0) ? smallTileNum : smallTileNum + 1;
     uint32_t smallTailDataNum = smallDataNum - (tileDataNum * smallTileNum);
     smallTailDataNum = smallTailDataNum == 0? tileDataNum : smallTailDataNum;
          
-    /// 计算大核其他参数
-    everyCoreInputCondBlock += 1;
-    // 1. 大核处理的总数据数量（个）
-    uint32_t bigDataNum = everyCoreInputCondBlock * BLOCK_SIZE / condTypeLength;
-    // 2. 大核处理的tile数量, finalBigTileNum
-    uint32_t bigTileNum = everyCoreInputCondBlock / tileCondBlockNum;
-    uint32_t finalBigTileNum = (everyCoreInputCondBlock % tileCondBlockNum == 0) ? bigTileNum : bigTileNum + 1;
-    // 3. 最后一次搬运的数据数量
-    uint32_t bigTailDataNum = bigDataNum - (tileDataNum * bigTileNum);
-    bigTailDataNum = bigTailDataNum == 0 ? tileDataNum : bigTailDataNum;
 
     /// 塞进tiling结构体
-    tiling.set_bigDataNum(bigDataNum);
     tiling.set_smallDataNum(smallDataNum);
-    tiling.set_finalBigTileNum(finalBigTileNum);
     tiling.set_finalSmallTileNum(finalSmallTileNum);
     tiling.set_tileDataNum(tileDataNum);
-    tiling.set_bigTailDataNum(bigTailDataNum);
     tiling.set_smallTailDataNum(smallTailDataNum);
-    tiling.set_tailBlockNum(tailBlockNum);
 
     
     // 3. 塞进tiling结构体
@@ -173,6 +143,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     tiling.set_yStrides(yStrides);
     
     /// workspace
+    context->SetBlockDim(1);
     tiling.SaveToBuffer(context->GetRawTilingData()->GetData(), context->GetRawTilingData()->GetCapacity());
     context->GetRawTilingData()->SetDataSize(tiling.GetDataSize());
     size_t *currentWorkspace = context->GetWorkspaceSizes(1);
