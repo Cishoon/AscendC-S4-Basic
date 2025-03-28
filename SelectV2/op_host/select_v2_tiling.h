@@ -16,8 +16,6 @@ BEGIN_TILING_DATA_DEF(SelectV2TilingData)
     
     TILING_DATA_FIELD_DEF(uint32_t, tailBlockNum);		  // 大核的个数，等于平均分配block的余数
     
-    TILING_DATA_FIELD_DEF(uint32_t, x1DataType);		  // x1的数据类型
-    
     // 广播相关的
     TILING_DATA_FIELD_DEF_ARR(uint32_t, 20, condShape); // cond的shape
     TILING_DATA_FIELD_DEF_ARR(uint32_t, 20, x1Shape);   // x1的shape

@@ -88,14 +88,27 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     ge::TypeUtils::GetDataTypeLength(context->GetInputDesc(0)->GetDataType(), condTypeLength);
     ge::TypeUtils::GetDataTypeLength(context->GetInputDesc(1)->GetDataType(), x1TypeLength);
     uint32_t r = x1TypeLength / condTypeLength; // 一定能整除，因为condTypeLength=1B
-    uint32_t x1DataType = static_cast<uint32_t>(context->GetInputDesc(1)->GetDataType());
             
     // 总共有几个 cond 块
     uint32_t condBlockNum = (totalDataNum + BLOCK_SIZE - 1) / BLOCK_SIZE;
     
     /// 计算每个tile内的参数
     // 1. tileCondBlockNum 一个tile里可以存几个 condBlock
-    uint32_t rate = 3 * r + 2; // TODO: 有一个冗余
+    // uint32_t rate = 3 * r + 1 + 2 * r + 2; // 3r: x1, x2, y; 1: condition; 2r: oneBuf, condBuf; 2: castBuf
+    uint32_t rate;
+    auto x1DataType = context->GetInputDesc(1)->GetDataType();
+    if (x1DataType == ge::DataType::DT_FLOAT16) {
+        rate = 11;
+    } else if (x1DataType == ge::DataType::DT_FLOAT) {
+        rate = 23;
+    } else if (x1DataType == ge::DataType::DT_INT8) {
+        rate = 14;
+    } else if (x1DataType == ge::DataType::DT_INT32) {
+        rate = 23;
+    } else {
+        return ge::GRAPH_FAILED;
+    }
+    
     uint32_t tileCondBlockNum = ubSize / BUFFER_NUM / BLOCK_SIZE / rate;
     // 2. 一个tile里的总block数量
     uint32_t tileBlockNum = rate * tileCondBlockNum;
@@ -141,7 +154,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     tiling.set_bigTailDataNum(bigTailDataNum);
     tiling.set_smallTailDataNum(smallTailDataNum);
     tiling.set_tailBlockNum(tailBlockNum);
-    tiling.set_x1DataType(x1DataType);
 
     
     // 3. 塞进tiling结构体

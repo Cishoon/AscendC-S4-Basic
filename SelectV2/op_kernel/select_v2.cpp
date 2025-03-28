@@ -2,11 +2,6 @@
 
 constexpr int32_t BUFFER_NUM = 2;
 
-#define DT_FLOAT 0
-#define DT_FLOAT16 1
-#define DT_INT8 2
-#define DT_INT32 3
-
 class KernelSelectV2 {
 private:
     uint32_t tileDataNum; // 除了最后一次，tile里的数据数量
@@ -14,7 +9,6 @@ private:
     uint32_t tileNum; // 这个核要计算的tile数量
     uint32_t tailDataNum; // 这个核最后一次计算的数据数量
     uint32_t processDataNum; // 这次要处理的数据数量
-    uint32_t x1DataType;
     
     uint32_t* condShape;
     uint32_t* x1Shape;
@@ -35,7 +29,7 @@ public:
     __aicore__ inline KernelSelectV2() {}
     __aicore__ inline void Init(GM_ADDR condition, GM_ADDR x1, GM_ADDR x2, GM_ADDR y, 
                                 uint32_t bigDataNum, uint32_t smallDataNum, uint32_t finalBigTileNum, uint32_t finalSmallTileNum, 
-                                uint32_t tileDataNum, uint32_t bigTailDataNum, uint32_t smallTailDataNum, uint32_t tailBlockNum, uint32_t x1DataType,
+                                uint32_t tileDataNum, uint32_t bigTailDataNum, uint32_t smallTailDataNum, uint32_t tailBlockNum,
                                 uint32_t* condShape, uint32_t* x1Shape, uint32_t* x2Shape, uint32_t* yShape, uint32_t yDimNum, 
                                 uint32_t* condStrides, uint32_t* x1Strides, uint32_t* x2Strides, uint32_t* yStrides)
     {
@@ -69,10 +63,27 @@ public:
         pipe.InitBuffer(inQueueX2, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_X2));
         pipe.InitBuffer(outQueueY, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_Y));
         
-        // pipe.InitBuffer(conditionBuf, this->tileDataNum * sizeof(uint8_t)); // TODO: 有冗余
+        if constexpr (std::is_same_v<DTYPE_X1, half>) {
+            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(half));
+        } else if constexpr (std::is_same_v<DTYPE_X1, int8_t>) {
+            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp3, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp4, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp5, this->tileDataNum * sizeof(half));
+        } else if constexpr (std::is_same_v<DTYPE_X1, int32_t>) {
+            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(int32_t));
+            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(int32_t));
+            pipe.InitBuffer(tmp3, this->tileDataNum * sizeof(half));
+        } else if constexpr (std::is_same_v<DTYPE_X1, float>) {
+            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(float));
+            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(float));
+            pipe.InitBuffer(tmp3, this->tileDataNum * sizeof(half));
+        } 
         
-        this->x1DataType = x1DataType;
         
+        // 广播相关参数
         this->condShape = condShape;
         this->x1Shape = x1Shape;
         this->x2Shape = x2Shape;
@@ -163,45 +174,113 @@ private:
     }
     __aicore__ inline void Compute(int32_t progress)
     {
-        // AscendC::LocalTensor<uint8_t> conditionLocalBuf = conditionBuf.Get<uint8_t>();
-        
-        AscendC::LocalTensor<DTYPE_CONDITION> conditionLocal = inQueueCondition.DeQue<DTYPE_CONDITION>();
-        AscendC::LocalTensor<DTYPE_X1> x1Local = inQueueX1.DeQue<DTYPE_X1>();
-        AscendC::LocalTensor<DTYPE_X2> x2Local = inQueueX2.DeQue<DTYPE_X2>();
-        AscendC::LocalTensor<DTYPE_Y> yLocal = outQueueY.AllocTensor<DTYPE_Y>();
-        
-        for (int32_t i = 0; i < this->processDataNum; i++) {
-            if (conditionLocal.GetValue(i) != 0) {
-                yLocal.SetValue(i, x1Local.GetValue(i));
-            } else {
-                yLocal.SetValue(i, x2Local.GetValue(i));
-            }
+        if constexpr (std::is_same_v<DTYPE_X1, half>) {
+            AscendC::LocalTensor<half> x1Local = inQueueX1.DeQue<half>();
+            AscendC::LocalTensor<half> x2Local = inQueueX2.DeQue<half>();
+            AscendC::LocalTensor<int8_t> _conditionLocal = inQueueCondition.DeQue<int8_t>();
+            AscendC::LocalTensor<half> yLocal = outQueueY.AllocTensor<half>();
+            
+            AscendC::LocalTensor<half> conditionLocal = tmp1.Get<half>();
+            AscendC::LocalTensor<half> nonCondtionLocal = tmp2.Get<half>(); 
+            
+            AscendC::Cast(conditionLocal, _conditionLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            
+            AscendC::Duplicate(nonCondtionLocal, (half)1, this->processDataNum);
+            AscendC::Sub(nonCondtionLocal, nonCondtionLocal, conditionLocal, this->processDataNum);
+            AscendC::Mul(x1Local, x1Local, conditionLocal, this->processDataNum); 
+            AscendC::Mul(x2Local, x2Local, nonCondtionLocal, this->processDataNum);
+            AscendC::Add(yLocal, x1Local, x2Local, this->processDataNum);
+            
+            outQueueY.EnQue<half>(yLocal);
+            inQueueCondition.FreeTensor(_conditionLocal);
+            inQueueX1.FreeTensor(x1Local);
+            inQueueX2.FreeTensor(x2Local);
+        } else if constexpr (std::is_same_v<DTYPE_X1, int8_t>) {
+            AscendC::LocalTensor<int8_t> _x1Local = inQueueX1.DeQue<int8_t>();
+            AscendC::LocalTensor<int8_t> _x2Local = inQueueX2.DeQue<int8_t>();
+            AscendC::LocalTensor<int8_t> _conditionLocal = inQueueCondition.DeQue<int8_t>();
+            AscendC::LocalTensor<int8_t> _yLocal = outQueueY.AllocTensor<int8_t>();
+            
+            AscendC::LocalTensor<half> x1Local = tmp1.Get<half>();
+            AscendC::LocalTensor<half> x2Local = tmp2.Get<half>();
+            AscendC::LocalTensor<half> conditionLocal = tmp3.Get<half>();
+            AscendC::LocalTensor<half> nonCondtionLocal = tmp4.Get<half>();
+            AscendC::LocalTensor<half> yLocal = tmp5.Get<half>();
+            
+            AscendC::Cast(conditionLocal, _conditionLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            AscendC::Cast(x1Local, _x1Local, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            AscendC::Cast(x2Local, _x2Local, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            
+            AscendC::Duplicate(nonCondtionLocal, (half)1, this->processDataNum);
+            AscendC::Sub(nonCondtionLocal, nonCondtionLocal, conditionLocal, this->processDataNum);
+            AscendC::Mul(x1Local, x1Local, conditionLocal, this->processDataNum); 
+            AscendC::Mul(x2Local, x2Local, nonCondtionLocal, this->processDataNum);
+            AscendC::Add(yLocal, x1Local, x2Local, this->processDataNum);
+            
+            AscendC::Cast(_yLocal, yLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            
+            outQueueY.EnQue<int8_t>(_yLocal);
+            inQueueCondition.FreeTensor(_conditionLocal);
+            inQueueX1.FreeTensor(_x1Local);
+            inQueueX2.FreeTensor(_x2Local);
+        } else if constexpr (std::is_same_v<DTYPE_X1, int32_t>) {
+            AscendC::LocalTensor<int32_t> x1Local = inQueueX1.DeQue<int32_t>();
+            AscendC::LocalTensor<int32_t> x2Local = inQueueX2.DeQue<int32_t>();
+            AscendC::LocalTensor<int8_t> _conditionLocal = inQueueCondition.DeQue<int8_t>();
+            AscendC::LocalTensor<int32_t> yLocal = outQueueY.AllocTensor<int32_t>();
+            
+            AscendC::LocalTensor<int32_t> conditionLocal = tmp1.Get<int32_t>();
+            AscendC::LocalTensor<int32_t> nonCondtionLocal = tmp2.Get<int32_t>();
+            AscendC::LocalTensor<half> tmp = tmp3.Get<half>();
+            
+            AscendC::Cast(tmp, _conditionLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            AscendC::Cast(conditionLocal, tmp, AscendC::RoundMode::CAST_CEIL, this->processDataNum);
+            
+            AscendC::Duplicate(nonCondtionLocal, (int32_t)1, this->processDataNum);
+            AscendC::Sub(nonCondtionLocal, nonCondtionLocal, conditionLocal, this->processDataNum);
+            AscendC::Mul(x1Local, x1Local, conditionLocal, this->processDataNum); 
+            AscendC::Mul(x2Local, x2Local, nonCondtionLocal, this->processDataNum);
+            AscendC::Add(yLocal, x1Local, x2Local, this->processDataNum);
+            
+            outQueueY.EnQue<int32_t>(yLocal);
+            inQueueCondition.FreeTensor(_conditionLocal);
+            inQueueX1.FreeTensor(x1Local);
+            inQueueX2.FreeTensor(x2Local);
+        } else if constexpr (std::is_same_v<DTYPE_X1, float>) {
+            AscendC::LocalTensor<float> x1Local = inQueueX1.DeQue<float>();
+            AscendC::LocalTensor<float> x2Local = inQueueX2.DeQue<float>();
+            AscendC::LocalTensor<int8_t> _conditionLocal = inQueueCondition.DeQue<int8_t>();
+            AscendC::LocalTensor<float> yLocal = outQueueY.AllocTensor<float>();
+            
+            AscendC::LocalTensor<float> conditionLocal = tmp1.Get<float>();
+            AscendC::LocalTensor<float> nonCondtionLocal = tmp2.Get<float>();
+            AscendC::LocalTensor<half> tmp = tmp3.Get<half>();
+            
+            AscendC::Cast(tmp, _conditionLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            AscendC::Cast(conditionLocal, tmp, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            
+            AscendC::Duplicate(nonCondtionLocal, (float)1, this->processDataNum);
+            AscendC::Sub(nonCondtionLocal, nonCondtionLocal, conditionLocal, this->processDataNum);
+            AscendC::Mul(x1Local, x1Local, conditionLocal, this->processDataNum); 
+            AscendC::Mul(x2Local, x2Local, nonCondtionLocal, this->processDataNum);
+            AscendC::Add(yLocal, x1Local, x2Local, this->processDataNum);
+            
+            outQueueY.EnQue<float>(yLocal);
+            inQueueCondition.FreeTensor(_conditionLocal);
+            inQueueX1.FreeTensor(x1Local);
+            inQueueX2.FreeTensor(x2Local);
         }
-        
-        // if (this->x1DataType == DT_FLOAT || this->x1DataType == DT_FLOAT16)  {
-        //     for (int32_t i = 0; i < this->processDataNum / 8; i++) {
-        //         uint8_t cond_tmp = 0;
-        //         for (int32_t j = 0; j < 8; j++) {
-        //             cond_tmp |= (conditionLocal.GetValue(i * 8 + j) << j);
-        //         }
-        //         conditionLocalBuf.SetValue(i, cond_tmp);
-        //     }
-        //     AscendC::Select(yLocal, conditionLocalBuf, x1Local, x2Local, AscendC::SELMODE::VSEL_TENSOR_TENSOR_MODE, this->processDataNum);
-        // } else {
-        //     for (int32_t i = 0; i < this->processDataNum; i++) {
-        //         if (conditionLocal.GetValue(i)) {
-        //             yLocal.SetValue(i, x1Local.GetValue(i));
-        //         } else {
-        //             yLocal.SetValue(i, x2Local.GetValue(i));
-        //         }
-        //     }
-        // } 
-        
-        // 保存结果、释放空间
-        outQueueY.EnQue<DTYPE_Y>(yLocal);
-        inQueueCondition.FreeTensor(conditionLocal);
-        inQueueX1.FreeTensor(x1Local);
-        inQueueX2.FreeTensor(x2Local);
+        else {
+            AscendC::LocalTensor<DTYPE_X1> x1Local = inQueueX1.DeQue<DTYPE_X1>();
+            AscendC::LocalTensor<DTYPE_X2> x2Local = inQueueX2.DeQue<DTYPE_X2>();
+            AscendC::LocalTensor<DTYPE_CONDITION> _conditionLocal = inQueueCondition.DeQue<DTYPE_CONDITION>();
+            AscendC::LocalTensor<DTYPE_Y> yLocal = outQueueY.AllocTensor<DTYPE_Y>();
+            
+            outQueueY.EnQue<DTYPE_Y>(yLocal);
+            inQueueCondition.FreeTensor(_conditionLocal);
+            inQueueX1.FreeTensor(x1Local);
+            inQueueX2.FreeTensor(x2Local);
+        }
     }
     __aicore__ inline void CopyOut(int32_t progress)
     {
@@ -217,7 +296,11 @@ private:
     AscendC::TQue<AscendC::QuePosition::VECIN, BUFFER_NUM> inQueueCondition;
     AscendC::TQue<AscendC::QuePosition::VECOUT, BUFFER_NUM> outQueueY;
     
-    // AscendC::TBuf<AscendC::TPosition::VECCALC> conditionBuf;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> tmp1;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> tmp2;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> tmp3;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> tmp4;
+    AscendC::TBuf<AscendC::TPosition::VECCALC> tmp5;
     
     AscendC::GlobalTensor<DTYPE_X1> x1Gm;
     AscendC::GlobalTensor<DTYPE_X2> x2Gm;
@@ -230,7 +313,7 @@ extern "C" __global__ __aicore__ void select_v2(GM_ADDR condition, GM_ADDR x1, G
     GET_TILING_DATA(tiling_data, tiling);
     KernelSelectV2 op;
     op.Init(condition, x1, x2, y, tiling_data.bigDataNum, tiling_data.smallDataNum, tiling_data.finalBigTileNum, tiling_data.finalSmallTileNum, 
-            tiling_data.tileDataNum, tiling_data.bigTailDataNum, tiling_data.smallTailDataNum, tiling_data.tailBlockNum, tiling_data.x1DataType,
+            tiling_data.tileDataNum, tiling_data.bigTailDataNum, tiling_data.smallTailDataNum, tiling_data.tailBlockNum,
             tiling_data.condShape, tiling_data.x1Shape, tiling_data.x2Shape, tiling_data.yShape, tiling_data.yDimNum, 
             tiling_data.condStrides, tiling_data.x1Strides, tiling_data.x2Strides, tiling_data.yStrides);
     op.Process();
