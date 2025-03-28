@@ -124,6 +124,7 @@ private:
     {
         uint32_t dstIndex = 0;
         for (int32_t i = 0; i < this->yDimNum; i++) {
+            if (strides[i] == 0) continue;
             dstIndex += srcIndex / yStrides[i] % shape[i] * strides[i];
         }
         return dstIndex;

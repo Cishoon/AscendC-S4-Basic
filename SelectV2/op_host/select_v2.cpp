@@ -77,7 +77,7 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     // 获取AICore数量
     auto coreNum = ascendcPlatform.GetCoreNum();
     auto aivNum = ascendcPlatform.GetCoreNumAiv();
-    coreNum = needBroadcast ? 1 : aivNum * 4;
+    coreNum = needBroadcast ? 1 : aivNum;
     context->SetBlockDim(coreNum);
     
     // 获取输入数据数量, totalDataNum表示几个元素
