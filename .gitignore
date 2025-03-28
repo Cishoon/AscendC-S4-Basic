@@ -1,0 +1,11 @@
+.vscode/
+testcase/
+zip_op.sh
+SelectV2.zip
+build_and_run.sh
+.zip
+**/build_out/
+**/build/
+**/cmake/
+**/data/
+*.zip
