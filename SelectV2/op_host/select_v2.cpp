@@ -89,20 +89,20 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     /// 计算每个tile内的参数
     // 1. tileCondBlockNum 一个tile里可以存几个 condBlock
     // uint32_t rate = 3 * r + 1 + 2 * r + 2; // 3r: x1, x2, y; 1: condition; 2r: oneBuf, condBuf; 2: castBuf
-    uint32_t rate;
+    uint32_t rate = 3 * r + 1;
     auto x1DataType = context->GetInputDesc(1)->GetDataType();
     switch (x1DataType) {
         case ge::DataType::DT_FLOAT16:
-            rate = 11;
-            break;
-        case ge::DataType::DT_FLOAT:
-            rate = 23;
+            rate += 3;
             break;
         case ge::DataType::DT_INT8:
-            rate = 14;
+            rate += 9;
             break;
         case ge::DataType::DT_INT32:
-            rate = 23;
+            rate += 9;
+            break;
+        case ge::DataType::DT_FLOAT:
+            rate += 3;
             break;
         default:
             return ge::GRAPH_FAILED;

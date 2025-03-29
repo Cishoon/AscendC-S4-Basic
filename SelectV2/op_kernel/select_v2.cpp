@@ -54,21 +54,20 @@ public:
         
         if constexpr (std::is_same_v<DTYPE_X1, half>) {
             pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(half));
-            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(uint8_t));
         } else if constexpr (std::is_same_v<DTYPE_X1, int8_t>) {
             pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(half));
             pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(half));
             pipe.InitBuffer(tmp3, this->tileDataNum * sizeof(half));
             pipe.InitBuffer(tmp4, this->tileDataNum * sizeof(half));
-            pipe.InitBuffer(tmp5, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp5, this->tileDataNum * sizeof(uint8_t));
         } else if constexpr (std::is_same_v<DTYPE_X1, int32_t>) {
             pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(int32_t));
             pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(int32_t));
             pipe.InitBuffer(tmp3, this->tileDataNum * sizeof(half));
         } else if constexpr (std::is_same_v<DTYPE_X1, float>) {
-            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(float));
-            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(float));
-            pipe.InitBuffer(tmp3, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(half));
+            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(uint8_t));
         } 
         
         
@@ -171,15 +170,11 @@ private:
             AscendC::LocalTensor<half> yLocal = outQueueY.AllocTensor<half>();
             
             AscendC::LocalTensor<half> conditionLocal = tmp1.Get<half>();
-            AscendC::LocalTensor<half> nonCondtionLocal = tmp2.Get<half>(); 
+            AscendC::LocalTensor<uint8_t> selMask = tmp2.Get<uint8_t>();
             
             AscendC::Cast(conditionLocal, _conditionLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
-            
-            AscendC::Duplicate(nonCondtionLocal, (half)1, this->processDataNum);
-            AscendC::Sub(nonCondtionLocal, nonCondtionLocal, conditionLocal, this->processDataNum);
-            AscendC::Mul(x1Local, x1Local, conditionLocal, this->processDataNum); 
-            AscendC::Mul(x2Local, x2Local, nonCondtionLocal, this->processDataNum);
-            AscendC::Add(yLocal, x1Local, x2Local, this->processDataNum);
+            AscendC::CompareScalar(selMask, conditionLocal, (half)0, AscendC::CMPMODE::GT, this->processDataNum);
+            AscendC::Select(yLocal, selMask, x1Local, x2Local, AscendC::SELMODE::VSEL_TENSOR_TENSOR_MODE, this->processDataNum);
             
             outQueueY.EnQue<half>(yLocal);
             inQueueCondition.FreeTensor(_conditionLocal);
@@ -194,18 +189,14 @@ private:
             AscendC::LocalTensor<half> x1Local = tmp1.Get<half>();
             AscendC::LocalTensor<half> x2Local = tmp2.Get<half>();
             AscendC::LocalTensor<half> conditionLocal = tmp3.Get<half>();
-            AscendC::LocalTensor<half> nonCondtionLocal = tmp4.Get<half>();
-            AscendC::LocalTensor<half> yLocal = tmp5.Get<half>();
+            AscendC::LocalTensor<half> yLocal = tmp4.Get<half>();
+            AscendC::LocalTensor<uint8_t> selMask = tmp5.Get<uint8_t>();
             
             AscendC::Cast(conditionLocal, _conditionLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
             AscendC::Cast(x1Local, _x1Local, AscendC::RoundMode::CAST_NONE, this->processDataNum);
             AscendC::Cast(x2Local, _x2Local, AscendC::RoundMode::CAST_NONE, this->processDataNum);
-            
-            AscendC::Duplicate(nonCondtionLocal, (half)1, this->processDataNum);
-            AscendC::Sub(nonCondtionLocal, nonCondtionLocal, conditionLocal, this->processDataNum);
-            AscendC::Mul(x1Local, x1Local, conditionLocal, this->processDataNum); 
-            AscendC::Mul(x2Local, x2Local, nonCondtionLocal, this->processDataNum);
-            AscendC::Add(yLocal, x1Local, x2Local, this->processDataNum);
+            AscendC::CompareScalar(selMask, conditionLocal, (half)0, AscendC::CMPMODE::GT, this->processDataNum);
+            AscendC::Select(yLocal, selMask, x1Local, x2Local, AscendC::SELMODE::VSEL_TENSOR_TENSOR_MODE, this->processDataNum);
             
             AscendC::Cast(_yLocal, yLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
             
@@ -242,18 +233,12 @@ private:
             AscendC::LocalTensor<int8_t> _conditionLocal = inQueueCondition.DeQue<int8_t>();
             AscendC::LocalTensor<float> yLocal = outQueueY.AllocTensor<float>();
             
-            AscendC::LocalTensor<float> conditionLocal = tmp1.Get<float>();
-            AscendC::LocalTensor<float> nonCondtionLocal = tmp2.Get<float>();
-            AscendC::LocalTensor<half> tmp = tmp3.Get<half>();
+            AscendC::LocalTensor<half> conditionLocal = tmp1.Get<half>();
+            AscendC::LocalTensor<uint8_t> selMask = tmp2.Get<uint8_t>();
             
-            AscendC::Cast(tmp, _conditionLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
-            AscendC::Cast(conditionLocal, tmp, AscendC::RoundMode::CAST_NONE, this->processDataNum);
-            
-            AscendC::Duplicate(nonCondtionLocal, (float)1, this->processDataNum);
-            AscendC::Sub(nonCondtionLocal, nonCondtionLocal, conditionLocal, this->processDataNum);
-            AscendC::Mul(x1Local, x1Local, conditionLocal, this->processDataNum); 
-            AscendC::Mul(x2Local, x2Local, nonCondtionLocal, this->processDataNum);
-            AscendC::Add(yLocal, x1Local, x2Local, this->processDataNum);
+            AscendC::Cast(conditionLocal, _conditionLocal, AscendC::RoundMode::CAST_NONE, this->processDataNum);
+            AscendC::CompareScalar(selMask, conditionLocal, (half)0, AscendC::CMPMODE::GT, this->processDataNum);
+            AscendC::Select(yLocal, selMask, x1Local, x2Local, AscendC::SELMODE::VSEL_TENSOR_TENSOR_MODE, this->processDataNum);
             
             outQueueY.EnQue<float>(yLocal);
             inQueueCondition.FreeTensor(_conditionLocal);
