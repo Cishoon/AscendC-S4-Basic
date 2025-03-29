@@ -113,7 +113,7 @@ private:
         uint32_t dstIndex = 0;
         for (int32_t i = 0; i < this->yDimNum; i++) {
             if (strides[i] != 0) {
-                dstIndex += srcIndex / yStrides[i] % shape[i] * strides[i];
+                dstIndex += srcIndex / yStrides[i] % yShape[i] * strides[i];
             }
         }
         return dstIndex;
