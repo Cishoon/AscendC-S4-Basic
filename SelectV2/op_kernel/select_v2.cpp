@@ -297,14 +297,16 @@ public:
     {
         uint32_t loopCount = this->tileNum;
         this->processDataNum = this->tileDataNum; // 这次要处理的数据数量
-        for (int32_t i = 0; i < loopCount; i++) {
-            if (i == loopCount - 1) {
-                this->processDataNum = this->tailDataNum;
-            }
+        uint32_t i = 0;
+        for (i = 0; i < loopCount - 1; i++) {
             CopyIn(i);
             Compute(i);
             CopyOut(i);
         }
+        this->processDataNum = this->tailDataNum;
+        CopyIn(i);
+        Compute(i);
+        CopyOut(i);
     }
     
 private:
