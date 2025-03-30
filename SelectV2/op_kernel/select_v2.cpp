@@ -292,6 +292,7 @@ public:
         this->condNeedBroadcast = condNeedBroadcast;
         this->x1NeedBroadcast = x1NeedBroadcast;
         this->x2NeedBroadcast = x2NeedBroadcast;
+
     }
     __aicore__ inline void Process()
     {
@@ -330,10 +331,43 @@ private:
         int32_t baseIndex = progress * this->tileDataNum;
         
         if (this->condNeedBroadcast) {
-            uint32_t conditionIndex = 0;
-            for (int i = 0; i < this->processDataNum; i++) {
-                conditionIndex = convertIndex(baseIndex + i, this->condStrides);
-                conditionLocal.SetValue(i, conditionGm.GetValue(conditionIndex));
+            uint32_t condIndex = 0;
+            uint32_t r[8] {};
+            uint32_t indices[8] {};
+            uint32_t currentOffset = 0;
+            
+            uint32_t n = baseIndex;
+            for (uint8_t i = 0; i < this->yDimNum; i++) {
+                r[i] = n % yStrides[i];
+                indices[i] = n / yStrides[i] % yShape[i];
+                currentOffset += indices[i] * condStrides[i];
+            }
+            
+            conditionLocal.SetValue(0, conditionGm.GetValue(currentOffset));
+            
+            for (int i = 1; i < this->processDataNum; i++) {
+                n += 1;
+                for (uint8_t dim = 0; dim < this->yDimNum; dim++) {
+                    const uint32_t& stride = condStrides[dim];
+                    if (stride == 0) {
+                        continue;
+                    }
+                    uint32_t &rdim = r[dim];
+                    if (rdim + 1 == yStrides[dim]) {
+                        rdim = 0;
+                        uint32_t &indice = indices[dim];
+                        if (indice + 1 == yShape[dim]) {
+                            currentOffset -= indice * stride;
+                            indice = 0;
+                        } else {
+                            currentOffset += stride;
+                            indice += 1;
+                        }
+                    } else {
+                        ++rdim;
+                    }
+                }
+                conditionLocal.SetValue(i, conditionGm.GetValue(currentOffset));
             }
         } else {
             AscendC::DataCopy(conditionLocal, conditionGm[progress * this->tileDataNum], this->processDataNum);
@@ -341,19 +375,86 @@ private:
 
         if (this->x1NeedBroadcast) {
             uint32_t x1Index = 0;
-            for (int i = 0; i < this->processDataNum; i++) {
-                x1Index = convertIndex(baseIndex + i, this->x1Strides);
-                x1Local.SetValue(i, x1Gm.GetValue(x1Index));
+            uint32_t r[8] {};
+            uint32_t indices[8] {};
+            uint32_t currentOffset = 0;
+            
+            uint32_t n = baseIndex;
+            for (uint8_t i = 0; i < this->yDimNum; i++) {
+                r[i] = n % yStrides[i];
+                indices[i] = n / yStrides[i] % yShape[i];
+                currentOffset += indices[i] * x1Strides[i];
             }
+            
+            x1Local.SetValue(0, x1Gm.GetValue(currentOffset));
+            
+            for (int i = 1; i < this->processDataNum; i++) {
+                n += 1;
+                for (uint8_t dim = 0; dim < this->yDimNum; dim++) {
+                    const uint32_t& stride = x1Strides[dim];
+                    if (stride == 0) {
+                        continue;
+                    }
+                    uint32_t &rdim = r[dim];
+                    if (rdim + 1 == yStrides[dim]) {
+                        rdim = 0;
+                        uint32_t &indice = indices[dim];
+                        if (indice + 1 == yShape[dim]) {
+                            currentOffset -= indice * stride;
+                            indice = 0;
+                        } else {
+                            currentOffset += stride;
+                            indice += 1;
+                        }
+                    } else {
+                        ++rdim;
+                    }
+                }
+                x1Local.SetValue(i, x1Gm.GetValue(currentOffset));
+            }
+            
         } else {
             AscendC::DataCopy(x1Local, x1Gm[progress * this->tileDataNum], this->processDataNum);
         }
         
         if (this->x2NeedBroadcast) {
             uint32_t x2Index = 0;
-            for (int i = 0; i < this->processDataNum; i++) {
-                x2Index = convertIndex(baseIndex + i, this->x2Strides);
-                x2Local.SetValue(i, x2Gm.GetValue(x2Index));
+            uint32_t r[8] {};
+            uint32_t indices[8] {};
+            uint32_t currentOffset = 0;
+            
+            uint32_t n = baseIndex;
+            for (uint8_t i = 0; i < this->yDimNum; i++) {
+                r[i] = n % yStrides[i];
+                indices[i] = n / yStrides[i] % yShape[i];
+                currentOffset += indices[i] * x2Strides[i];
+            }
+            
+            x2Local.SetValue(0, x2Gm.GetValue(currentOffset));
+            
+            for (int i = 1; i < this->processDataNum; i++) {
+                n += 1;
+                for (uint8_t dim = 0; dim < this->yDimNum; dim++) {
+                    const uint32_t& stride = x2Strides[dim];
+                    if (stride == 0) {
+                        continue;
+                    }
+                    uint32_t &rdim = r[dim];
+                    if (rdim + 1 == yStrides[dim]) {
+                        rdim = 0;
+                        uint32_t &indice = indices[dim];
+                        if (indice + 1 == yShape[dim]) {
+                            currentOffset -= indice * stride;
+                            indice = 0;
+                        } else {
+                            currentOffset += stride;
+                            indice += 1;
+                        }
+                    } else {
+                        ++rdim;
+                    }
+                }
+                x2Local.SetValue(i, x2Gm.GetValue(currentOffset));
             }
         } else {
             AscendC::DataCopy(x2Local, x2Gm[progress * this->tileDataNum], this->processDataNum);
@@ -491,10 +592,7 @@ extern "C" __global__ __aicore__ void select_v2(GM_ADDR condition, GM_ADDR x1, G
     GET_TILING_DATA(tiling_data, tiling);
     AscendC::TPipe pipe;
     
-    // 检查是否需要广播
-    bool needBroadCast = tiling_data.needBroadcast;
-    
-    if (needBroadCast) {
+    if (tiling_data.needBroadcast) {
         KernelSelectV2BroadCast op;
         op.Init(condition, x1, x2, y, tiling_data.smallDataNum, tiling_data.finalSmallTileNum, 
                 tiling_data.tileDataNum, tiling_data.smallTailDataNum, 
