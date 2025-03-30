@@ -31,7 +31,7 @@ public:
                                 uint32_t smallDataNum, uint32_t finalSmallTileNum, 
                                 uint32_t tileDataNum, uint32_t smallTailDataNum, 
                                 uint32_t* condShape, uint32_t* x1Shape, uint32_t* x2Shape, uint32_t* yShape, uint32_t yDimNum, 
-                                uint32_t* condStrides, uint32_t* x1Strides, uint32_t* x2Strides, uint32_t* yStrides)
+                                uint32_t* condStrides, uint32_t* x1Strides, uint32_t* x2Strides, uint32_t* yStrides, AscendC::TPipe* pipeIn)
     {
         uint32_t blockNum = AscendC::GetBlockNum();
         ASSERT(blockNum != 0 && "GetBlockNum() is 0");
@@ -47,27 +47,28 @@ public:
         x2Gm.SetGlobalBuffer((__gm__ DTYPE_X2 *)x2, this->dataNum);
         yGm.SetGlobalBuffer((__gm__ DTYPE_Y *)y, this->dataNum);
         
-        pipe.InitBuffer(inQueueCondition, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_CONDITION));
-        pipe.InitBuffer(inQueueX1, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_X1));
-        pipe.InitBuffer(inQueueX2, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_X2));
-        pipe.InitBuffer(outQueueY, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_Y));
+        pipe = pipeIn;
+        pipe->InitBuffer(inQueueCondition, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_CONDITION));
+        pipe->InitBuffer(inQueueX1, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_X1));
+        pipe->InitBuffer(inQueueX2, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_X2));
+        pipe->InitBuffer(outQueueY, BUFFER_NUM, this->tileDataNum * sizeof(DTYPE_Y));
         
         if constexpr (std::is_same_v<DTYPE_X1, half>) {
-            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(half));
-            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(uint8_t));
+            pipe->InitBuffer(tmp1, this->tileDataNum * sizeof(half));
+            pipe->InitBuffer(tmp2, this->tileDataNum * sizeof(uint8_t));
         } else if constexpr (std::is_same_v<DTYPE_X1, int8_t>) {
-            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(half));
-            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(half));
-            pipe.InitBuffer(tmp3, this->tileDataNum * sizeof(half));
-            pipe.InitBuffer(tmp4, this->tileDataNum * sizeof(half));
-            pipe.InitBuffer(tmp5, this->tileDataNum * sizeof(uint8_t));
+            pipe->InitBuffer(tmp1, this->tileDataNum * sizeof(half));
+            pipe->InitBuffer(tmp2, this->tileDataNum * sizeof(half));
+            pipe->InitBuffer(tmp3, this->tileDataNum * sizeof(half));
+            pipe->InitBuffer(tmp4, this->tileDataNum * sizeof(half));
+            pipe->InitBuffer(tmp5, this->tileDataNum * sizeof(uint8_t));
         } else if constexpr (std::is_same_v<DTYPE_X1, int32_t>) {
-            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(int32_t));
-            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(int32_t));
-            pipe.InitBuffer(tmp3, this->tileDataNum * sizeof(half));
+            pipe->InitBuffer(tmp1, this->tileDataNum * sizeof(int32_t));
+            pipe->InitBuffer(tmp2, this->tileDataNum * sizeof(int32_t));
+            pipe->InitBuffer(tmp3, this->tileDataNum * sizeof(half));
         } else if constexpr (std::is_same_v<DTYPE_X1, float>) {
-            pipe.InitBuffer(tmp1, this->tileDataNum * sizeof(half));
-            pipe.InitBuffer(tmp2, this->tileDataNum * sizeof(uint8_t));
+            pipe->InitBuffer(tmp1, this->tileDataNum * sizeof(half));
+            pipe->InitBuffer(tmp2, this->tileDataNum * sizeof(uint8_t));
         } 
         
         
@@ -266,7 +267,7 @@ private:
     }
 
 private:
-    AscendC::TPipe pipe;
+    AscendC::TPipe* pipe;
     AscendC::TQue<AscendC::QuePosition::VECIN, BUFFER_NUM> inQueueX1;
     AscendC::TQue<AscendC::QuePosition::VECIN, BUFFER_NUM> inQueueX2;
     AscendC::TQue<AscendC::QuePosition::VECIN, BUFFER_NUM> inQueueCondition;
@@ -287,10 +288,11 @@ private:
 
 extern "C" __global__ __aicore__ void select_v2(GM_ADDR condition, GM_ADDR x1, GM_ADDR x2, GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling) {
     GET_TILING_DATA(tiling_data, tiling);
+    AscendC::TPipe pipe;
     KernelSelectV2 op;
     op.Init(condition, x1, x2, y, tiling_data.smallDataNum, tiling_data.finalSmallTileNum, 
             tiling_data.tileDataNum, tiling_data.smallTailDataNum, 
             tiling_data.condShape, tiling_data.x1Shape, tiling_data.x2Shape, tiling_data.yShape, tiling_data.yDimNum, 
-            tiling_data.condStrides, tiling_data.x1Strides, tiling_data.x2Strides, tiling_data.yStrides);
+            tiling_data.condStrides, tiling_data.x1Strides, tiling_data.x2Strides, tiling_data.yStrides, &pipe);
     op.Process();
 }
