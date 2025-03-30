@@ -66,3 +66,5 @@ if (${ENABLE_SOURCE_PACKAGE})
             DESTINATION packages/vendors/${vendor_name}/op_impl/ai_core/tbe/${vendor_name}_impl/dynamic
     )
 endif()
+
+# add_ops_compile_options(ALL OPTIONS -g)
