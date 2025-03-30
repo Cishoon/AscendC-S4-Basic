@@ -11,65 +11,80 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     SelectV2TilingData tiling;
     auto ascendcPlatform = platform_ascendc::PlatformAscendC(context->GetPlatformInfo());
     
-    /// 广播相关tiling
+    /// 广播相关tiling    
     // 1. 获取输入输出shape
     auto condShape = context->GetInputShape(0)->GetOriginShape();
     auto x1Shape = context->GetInputShape(1)->GetOriginShape();
     auto x2Shape = context->GetInputShape(2)->GetOriginShape();
     auto yShape = context->GetOutputShape(0)->GetOriginShape();
-    int32_t yDimNum = static_cast<int32_t>(yShape.GetDimNum());
-    int32_t condDimNum = static_cast<int32_t>(condShape.GetDimNum());
-    int32_t x1DimNum = static_cast<int32_t>(x1Shape.GetDimNum());
-    int32_t x2DimNum = static_cast<int32_t>(x2Shape.GetDimNum());
-    if (yDimNum > 20 || condDimNum > 20 || x1DimNum > 20 || x2DimNum > 20) {
-        return ge::GRAPH_FAILED;
-    }
-    uint32_t condShapeVec[20] {};
-    uint32_t x1ShapeVec[20] {};
-    uint32_t x2ShapeVec[20] {};
-    uint32_t yShapeVec[20] {};
-    for (int32_t i = 0; i < yDimNum; i++) {
-        yShapeVec[i] = yShape.GetDim(yDimNum - 1 - i);
-        condShapeVec[i] = condDimNum - 1 - i >= 0 ? condShape.GetDim(condDimNum - 1 - i) : 1;
-        x1ShapeVec[i] = x1DimNum - 1 - i >= 0 ? x1Shape.GetDim(x1DimNum - 1 - i) : 1;
-        x2ShapeVec[i] = x2DimNum - 1 - i >= 0 ? x2Shape.GetDim(x2DimNum - 1 - i) : 1;
-    }
-    
-    // 2. 获取输入输出strides
-    uint32_t condStrides[20] {};
-    uint32_t x1Strides[20] {};
-    uint32_t x2Strides[20] {};
-    uint32_t yStrides[20] {};
-    
-    uint32_t y_stride = 1, cond_stride = 1, x1_stride = 1, x2_stride = 1;
-    for (size_t i = 0; i < yDimNum; i++) {
-        if (yShapeVec[i] != 1) {
-            yStrides[i] = y_stride;
-            y_stride *= yShapeVec[i];
-        }
-        if (condShapeVec[i] != 1) {
-            condStrides[i] = cond_stride;
-            cond_stride *= condShapeVec[i];
-        }
-        if (x1ShapeVec[i] != 1) {
-            x1Strides[i] = x1_stride;
-            x1_stride *= x1ShapeVec[i];
-        }
-        if (x2ShapeVec[i] != 1) {
-            x2Strides[i] = x2_stride;
-            x2_stride *= x2ShapeVec[i];
-        }
-    }
+    auto condShapeSize = condShape.GetShapeSize();
+    auto x1ShapeSize = x1Shape.GetShapeSize();
+    auto x2ShapeSize = x2Shape.GetShapeSize();
+    auto yShapeSize = yShape.GetShapeSize();
     
     // 判断是否需要广播
-    uint32_t needBroadcast = 0;
-    for (int i = 0; i < yDimNum; i++) {
-        if (condShapeVec[i] != yShapeVec[i] || x1ShapeVec[i] != yShapeVec[i] || x2ShapeVec[i] != yShapeVec[i]) {
-            needBroadcast = 1;
-            break;
+    uint8_t condNeedBroadcast = condShapeSize != yShapeSize;
+    uint8_t x1NeedBroadcast = x1ShapeSize != yShapeSize;
+    uint8_t x2NeedBroadcast = x2ShapeSize != yShapeSize;
+    uint8_t needBroadcast = condNeedBroadcast || x1NeedBroadcast || x2NeedBroadcast;
+    tiling.set_needBroadcast(needBroadcast);
+    if (needBroadcast) {
+        uint8_t yDimNum = static_cast<uint8_t>(yShape.GetDimNum());
+        uint8_t condDimNum = static_cast<uint8_t>(condShape.GetDimNum());
+        uint8_t x1DimNum = static_cast<uint8_t>(x1Shape.GetDimNum());
+        uint8_t x2DimNum = static_cast<uint8_t>(x2Shape.GetDimNum());
+        if (yDimNum > 8 || condDimNum > 8 || x1DimNum > 8 || x2DimNum > 8) {
+            return ge::GRAPH_FAILED;
         }
+        uint16_t condShapeVec[8] {};
+        uint16_t x1ShapeVec[8] {};
+        uint16_t x2ShapeVec[8] {};
+        uint16_t yShapeVec[8] {};
+        for (int32_t i = 0; i < yDimNum; i++) {
+            yShapeVec[i] = static_cast<uint16_t>(yShape.GetDim(yDimNum - 1 - i));
+            condShapeVec[i] = condDimNum - 1 - i >= 0 ? static_cast<uint16_t>(condShape.GetDim(condDimNum - 1 - i)) : 1;
+            x1ShapeVec[i] = x1DimNum - 1 - i >= 0 ? static_cast<uint16_t>(x1Shape.GetDim(x1DimNum - 1 - i)) : 1;
+            x2ShapeVec[i] = x2DimNum - 1 - i >= 0 ? static_cast<uint16_t>(x2Shape.GetDim(x2DimNum - 1 - i)) : 1;
+        }
+        
+        // 2. 获取输入输出strides
+        uint32_t condStrides[8] {};
+        uint32_t x1Strides[8] {};
+        uint32_t x2Strides[8] {};
+        uint32_t yStrides[8] {};
+        
+        uint32_t y_stride = 1, cond_stride = 1, x1_stride = 1, x2_stride = 1;
+        for (size_t i = 0; i < yDimNum; i++) {
+            if (yShapeVec[i] != 1) {
+                yStrides[i] = y_stride;
+                y_stride *= yShapeVec[i];
+            }
+            if (condShapeVec[i] != 1) {
+                condStrides[i] = cond_stride;
+                cond_stride *= condShapeVec[i];
+            }
+            if (x1ShapeVec[i] != 1) {
+                x1Strides[i] = x1_stride;
+                x1_stride *= x1ShapeVec[i];
+            }
+            if (x2ShapeVec[i] != 1) {
+                x2Strides[i] = x2_stride;
+                x2_stride *= x2ShapeVec[i];
+            }
+        }
+        
+        // 3. 塞进tiling结构体
+        tiling.set_yDimNum(yDimNum);
+        tiling.set_yShape(yShapeVec);
+        tiling.set_condStrides(condStrides);
+        tiling.set_x1Strides(x1Strides);
+        tiling.set_x2Strides(x2Strides);
+        tiling.set_yStrides(yStrides);
+        tiling.set_condNeedBroadcast(condNeedBroadcast);
+        tiling.set_x1NeedBroadcast(x1NeedBroadcast);
+        tiling.set_x2NeedBroadcast(x2NeedBroadcast);
     }
-
+    
     // 每个核一次计算最多能处理的字节数，从接口获取
     uint64_t ubSize; 	
     ascendcPlatform.GetCoreMemSize(platform_ascendc::CoreMemType::UB, ubSize);
@@ -88,7 +103,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     
     /// 计算每个tile内的参数
     // 1. tileCondBlockNum 一个tile里可以存几个 condBlock
-    // uint32_t rate = 3 * r + 1 + 2 * r + 2; // 3r: x1, x2, y; 1: condition; 2r: oneBuf, condBuf; 2: castBuf
     uint32_t rate = 3 * r + 1;
     auto x1DataType = context->GetInputDesc(1)->GetDataType();
     switch (x1DataType) {
@@ -112,11 +126,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     // 3. 一个tile里的数据数量
     uint32_t tileDataNum = BLOCK_SIZE * tileCondBlockNum / condTypeLength;
     
-    // 每个核平均计算几个cond block
-    // uint32_t everyCoreInputCondBlock = condBlockNum;
-    // 余数，即需要多少个大核
-    // uint32_t tailBlockNum = 0;
-    
     uint32_t smallDataNum = condBlockNum * BLOCK_SIZE / condTypeLength;
     uint32_t smallTileNum = condBlockNum / tileCondBlockNum;
     uint32_t finalSmallTileNum = (condBlockNum % tileCondBlockNum == 0) ? smallTileNum : smallTileNum + 1;
@@ -130,18 +139,6 @@ static ge::graphStatus TilingFunc(gert::TilingContext* context)
     tiling.set_tileDataNum(tileDataNum);
     tiling.set_smallTailDataNum(smallTailDataNum);
 
-    
-    // 3. 塞进tiling结构体
-    tiling.set_yDimNum(yDimNum);
-    tiling.set_condShape(condShapeVec);
-    tiling.set_x1Shape(x1ShapeVec);
-    tiling.set_x2Shape(x2ShapeVec);
-    tiling.set_yShape(yShapeVec);
-    tiling.set_condStrides(condStrides);
-    tiling.set_x1Strides(x1Strides);
-    tiling.set_x2Strides(x2Strides);
-    tiling.set_yStrides(yStrides);
-    
     /// workspace
     context->SetBlockDim(1);
     tiling.SaveToBuffer(context->GetRawTilingData()->GetData(), context->GetRawTilingData()->GetCapacity());
